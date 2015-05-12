@@ -26,6 +26,14 @@ Router.route('/sickrage', function () {
     this.render('sickrage');
 });
 
+Router.route('/sonarr', {
+    name: 'sonarr'
+});
+
+Router.route('/about', {
+    name: 'about'
+});
+
 Template.body.helpers({
     url: function () {
     return Meteor.absoluteUrl();
@@ -34,20 +42,37 @@ Template.body.helpers({
 
 Houston.menu({
     'type': 'link',
+    'use': '/about',
+    'title': 'About',
+    'target': '_blank'
+});
+
+Houston.menu({
+    'type': 'link',
     'use': '/plex',
     'title': 'Plex Auth Setup',
+    'target': '_blank'
 });
 
 Houston.menu({
     'type': 'link',
     'use': '/couchpotato',
     'title': 'CouchPotato Status',
+    'target': '_blank'
 });
 
 Houston.menu({
     'type': 'link',
     'use': '/sickrage',
     'title': 'SickRage Status',
+    'target': '_blank'
+});
+
+Houston.menu({
+    'type': 'link',
+    'use': '/sonarr',
+    'title': 'Sonarr Status',
+    'target': '_blank'
 });
 
 Houston.menu({

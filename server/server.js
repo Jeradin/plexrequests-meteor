@@ -43,6 +43,17 @@ if (!(Settings.findOne({_id: "pushbulletsetting"}))) {
     });
 };
 
+// PushOver
+if (!(Settings.findOne({_id: "pushoversetting"}))) {
+    Settings.insert({
+        _id: "pushoversetting",
+        service: "PushOver",
+        api: "abcdef0123456789",
+        userKey: "abcdef0123456789",
+        enabled: false
+    });
+};
+
 if (!(Settings.findOne({_id: "sickragesetting"}))) {
     Settings.insert({
         _id: "sickragesetting",
@@ -52,14 +63,73 @@ if (!(Settings.findOne({_id: "sickragesetting"}))) {
     });
 };
 
+if (!(Settings.findOne({_id: "sonarrsetting"}))) {
+    Settings.insert({
+        _id: "sonarrsetting",
+        service: "Sonarr",
+        api: "http://192.168.0.1:8989",
+        api_key: "abcdef0123456789",
+        qualityProfileId: 1,
+        rootFolderPath: "/path/to/root/tv/folder/",
+        seasonFolder: "true",
+        enabled: false
+    });
+};
+
 Meteor.methods({
-    'pushBullet' : function (movie, year, puser) {
-        if (Settings.findOne({_id:"pushbulletsetting"}).enabled) {
+    'pushService' : function (media, year, plexUser, type) {
+        check(media, String);
+        check(year, String);
+        check(plexUser, String);
+        check(type, String);
+
+        var url, options;
+
+        var msgTitle = 'Plex Requests by ' + plexUser;
+        var msgBody = type + ': ' + media + ' (' + year + ')';
+
+
+        if (pushBullet = Settings.findOne({_id:"pushbulletsetting"}).enabled) {
+            // PushBullet
             var pbAPI = Settings.findOne({_id:"pushbulletsetting"}).api;
-            Meteor.http.call("POST", "https://api.pushbullet.com/v2/pushes",
-                             {auth: pbAPI + ":",
-                              params: {"type": "note", "title": "Plex Requests by " + puser, "body": movie + " (" + year + ")"}
-                             });
+
+            options = {
+                auth: pbAPI + ':',
+                params: {
+                    type: 'note',
+                    title: msgTitle,
+                    body: msgBody
+                }
+            }
+
+            url = 'https://api.pushbullet.com/v2/pushes';
+            
+            Meteor.http.post(url, options);
+            
+        } else if (Settings.findOne({_id:"pushoversetting"}).enabled) {
+            // PushOver
+            var pushOver = Settings.findOne('pushoversetting');
+
+            var pushOverToken = pushOver.api;
+            var pushOverUserKey = pushOver.userKey;
+
+            options = {
+                params: {
+                    token: pushOverToken,
+                    user: pushOverUserKey,
+                    title: msgTitle,
+                    message: msgBody
+                }
+            };
+            
+            url = 'https://api.pushover.net/1/messages.json';
+            
+            Meteor.http.post(url, options);
+            
+        } else {
+            // No service enabled
+            console.log('Error: please enable a service'); 
+            return;
         }
     },
     'searchCP' : function (id, imdb, movie, year, puser) {
@@ -272,18 +342,7 @@ Meteor.methods({
                 var sickRageAdd = Meteor.http.call("GET", srAPI  + "?cmd=show.addnew&tvdbid=" + tvdb);
 
                 if (sickRageAdd['data']['result'] === "success") {
-                    TV.insert({
-                        title: title,
-                        id: id,
-                        tvdb: tvdb,
-                        released: year,
-                        user: puser,
-                        downloaded: false,
-                        createdAt: new Date()
-                    });
                     return "added";
-                }else if(sickRageAdd['data']['result'] === "failure"){ //Message is "An existing indexerid already exists in database"
-	                return "downloaded";
                 } else {
                     return "error"
                 }
@@ -294,20 +353,7 @@ Meteor.methods({
                 return "error";
             }
 
-        } else {
-        //If not enabled add to requests lists
-            TV.insert({
-                title: title,
-                id: id,
-                tvdb: tvdb,
-                released: year,
-                user: puser,
-                downloaded: false,
-                createdAt: new Date()
-            });
-            return "added";
         }
-
     },
     'checkSREnabled' : function () {
         return Settings.findOne({_id:"sickragesetting"}).enabled;
@@ -322,4 +368,138 @@ Meteor.methods({
         return (status['data']['result']);
 
     },
+    'checkSO' : function () {
+        soAPI = Settings.findOne({_id:"sonarrsetting"}).api_key;
+        soURL = Settings.findOne({_id:"sonarrsetting"}).api;
+        
+         try {
+             var status = Meteor.http.call("GET", soURL + "/api/system/status/", {headers: {"X-Api-Key":soAPI}, timeout:5000});
+             
+             if(status.statusCode === 200){
+                 // authorized
+                return true;
+             } else {
+                 // Something else happened
+                 return false;
+             }
+         }
+        catch (error) {
+            //If can't connect error out
+            console.log(error)
+            return false;
+        }
+        
+        return false;   
+    },
+    'checkSOEnabled' : function () {
+        return Settings.findOne({_id:"sonarrsetting"}).enabled;
+    },
+    'searchSonarr' : function(id, tvdb, title, year, puser) {
+            
+        //HTTPS Requests
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+        //Check if Sonarr up
+        soAPI = Settings.findOne({_id:"sonarrsetting"}).api_key;
+        soURL = Settings.findOne({_id:"sonarrsetting"}).api;
+        soQualityProfileId = Settings.findOne({_id:"sonarrsetting"}).qualityProfileId;
+        soRootFolderPath = Settings.findOne({_id:"sonarrsetting"}).rootFolderPath;
+        soSeasonFolder = Settings.findOne({_id:"sonarrsetting"}).seasonFolder;
+        try {
+            var status = Meteor.http.call("GET", soURL + "/api/system/status/", {headers: {"X-Api-Key":soAPI}, timeout:5000});
+        }
+        catch (error) {
+            //If can't connect error out
+            console.log(error)
+            return "error";
+        }
+
+        //Attempt to add series
+        try {
+            var addSonarr = Meteor.http.call("POST", soURL + "/api/Series/", {headers: {"X-Api-Key":soAPI}, data: {
+                "tvdbId":tvdb,
+                "title":title,
+                "qualityProfileId":soQualityProfileId,
+                "seasons":[{}],
+                "seasonFolder":soSeasonFolder,
+                "rootFolderPath":soRootFolderPath
+            }});
+            return "added";
+        }
+        catch (e) {
+            var search = e.message.search("This series has already been added");
+
+            if (search != -1) {
+                return "downloaded";
+            } else {
+                console.log(e);
+                return "error";
+            }
+        }
+        return false;
+    },
+    'addTV' : function(id, tvdb, title, year, puser) {
+        if (Settings.findOne({_id:"sonarrsetting"}).enabled){
+            var sickAdd = Meteor.call('searchSonarr', id, tvdb, title, year, puser);   
+        }
+        
+        if (Settings.findOne({_id:"sickragesetting"}).enabled) {
+            var sonarAdd = Meteor.call('searchSickRage', id, tvdb, title, year, puser);
+        } 
+        
+        if ((sickAdd == "added") || (sonarAdd == "added")) {
+            TV.insert({
+              title: title,
+              id: id,
+              tvdb: tvdb,
+              released: year,
+              user: puser,
+              downloaded: false,
+              createdAt: new Date()
+            });
+            return "added";
+        }
+        
+        if (sickAdd) {
+            return sickAdd;
+        } else if (sonarAdd) {
+            return sonarAdd;
+        } else {
+            TV.insert({
+              title: title,
+              id: id,
+              tvdb: tvdb,
+              released: year,
+              user: puser,
+              downloaded: false,
+              createdAt: new Date()
+            });
+            return "added";
+        }
+    },
+    'getCommit' : function(){
+        var currentCommit = Meteor.npmRequire('git-rev-sync');
+        return currentCommit.short();
+    },
+    'getBranch' : function(){
+        var currentBranch = Meteor.npmRequire('git-rev-sync');
+        return currentBranch.branch();
+    },
+    'getCurrentCommit' : function(){
+        var git = Meteor.npmRequire('git-rev-sync');
+        var branch = git.branch();
+        var commit = git.long();
+        
+        var latestGit = Meteor.http.call("GET", "https://api.github.com/repos/lokenx/plexrequests-meteor/branches/" + branch,
+                                         {headers: {"User-Agent": "Meteor/1.1"}});
+        
+        if (latestGit.statusCode == 403) {
+            return "error"
+        } else if (latestGit['data']['commit']['sha'] == commit) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
 });

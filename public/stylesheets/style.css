@@ -125,7 +125,7 @@ th, td {
       padding: 10px 15px!important;
   }
 th, td:before {
-    color: #dd5!important;
+    color: #ebebeb!important;
   }
 
 .reactive-table-navigation .form-inline input {
@@ -134,7 +134,6 @@ th, td:before {
   height: 26px;
   text-align: center;
 }
-
 /*
 Bootstrap no tables mobile
 http://bootsnipp.com/snippets/featured/no-more-tables-respsonsive-table
