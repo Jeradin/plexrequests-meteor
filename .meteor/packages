@@ -12,4 +12,11 @@ peerlibrary:xml2js
 u2622:persistent-session
 aslagle:reactive-table
 meteorhacks:npm
+<<<<<<< HEAD
 npm-container
+=======
+
+
+npm-container
+mizzao:bootstrap-3
+>>>>>>> lokenx/master

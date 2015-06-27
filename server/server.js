@@ -10,10 +10,15 @@ Meteor.publish('cpapi', function () {
     if(this.userId) return Settings.find({});
 });
 
+Meteor.publish('version', function (){
+    return Version.find({});
+});
+
 
 Houston.add_collection(Settings);
 Houston.add_collection(Movies);
 Houston.add_collection(TV);
+Houston.add_collection(Version);
 
 
 if (!(Settings.findOne({_id: "couchpotatosetting"}))) {
@@ -76,6 +81,16 @@ if (!(Settings.findOne({_id: "sonarrsetting"}))) {
     });
 };
 
+if (!(Version.findOne({_id:"versionInfo"}))) {
+    Version.insert({
+        _id: "versionInfo",
+        branch: "",
+        number: "",
+        updateAvailable: false
+    });
+}
+
+
 Meteor.methods({
     'pushService' : function (media, year, plexUser, type) {
         check(media, String);
@@ -103,9 +118,9 @@ Meteor.methods({
             }
 
             url = 'https://api.pushbullet.com/v2/pushes';
-            
+
             Meteor.http.post(url, options);
-            
+
         } else if (Settings.findOne({_id:"pushoversetting"}).enabled) {
             // PushOver
             var pushOver = Settings.findOne('pushoversetting');
@@ -121,14 +136,14 @@ Meteor.methods({
                     message: msgBody
                 }
             };
-            
+
             url = 'https://api.pushover.net/1/messages.json';
-            
+
             Meteor.http.post(url, options);
-            
+
         } else {
             // No service enabled
-            console.log('Error: please enable a service'); 
+            console.log('Error: please enable a service');
             return;
         }
     },
@@ -317,12 +332,16 @@ Meteor.methods({
         }
 
     },
-    'searchSickRage' : function(id, tvdb, title, year, puser) {
+    'searchSickRage' : function(id, tvdb, title, year, puser, getAll) {
         //Check if SickRage service is enabled
         if (Settings.findOne({_id:"sickragesetting"}).enabled){
 
             //If enabled check if can connect to it
             var srAPI = Settings.findOne({_id:"sickragesetting"}).api;
+            var episodeStatus = "skipped";
+            if (getAll === true) {
+                episodeStatus = "wanted";
+            }
 
             //Workaround to allow self-signed SSL certs, however can be dangerous and should not be used in production, looking into better way
             //But it's possible there's nothing much I can do
@@ -339,7 +358,7 @@ Meteor.methods({
             //If can connect see if series is in DB already
             if (Meteor.http.call("GET", srAPI + "?cmd=show&tvdbid=" + tvdb)['data']['result'] === "failure") {
                 //If not in DB add to DB
-                var sickRageAdd = Meteor.http.call("GET", srAPI  + "?cmd=show.addnew&tvdbid=" + tvdb);
+                var sickRageAdd = Meteor.http.call("GET", srAPI  + "?cmd=show.addnew&tvdbid=" + tvdb + "&status=" + episodeStatus);
 
                 if (sickRageAdd['data']['result'] === "success") {
                     return "added";
@@ -371,10 +390,10 @@ Meteor.methods({
     'checkSO' : function () {
         soAPI = Settings.findOne({_id:"sonarrsetting"}).api_key;
         soURL = Settings.findOne({_id:"sonarrsetting"}).api;
-        
+
          try {
              var status = Meteor.http.call("GET", soURL + "/api/system/status/", {headers: {"X-Api-Key":soAPI}, timeout:5000});
-             
+
              if(status.statusCode === 200){
                  // authorized
                 return true;
@@ -388,14 +407,14 @@ Meteor.methods({
             console.log(error)
             return false;
         }
-        
-        return false;   
+
+        return false;
     },
     'checkSOEnabled' : function () {
         return Settings.findOne({_id:"sonarrsetting"}).enabled;
     },
-    'searchSonarr' : function(id, tvdb, title, year, puser) {
-            
+    'searchSonarr' : function(id, tvdb, title, year, puser, getAll, totalSeasons) {
+
         //HTTPS Requests
         process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -414,15 +433,31 @@ Meteor.methods({
             return "error";
         }
 
+        //Seasons variable currently unused.
+        var seasons = [];
+
+        var options = [];
+        if (getAll === false) {
+            options = ({
+                "ignoreEpisodesWithFiles": true,
+                "ignoreEpisodesWithoutFiles": true
+            });
+        } else {
+            options = ({
+                "ignoreEpisodesWithFiles": false,
+                "ignoreEpisodesWithoutFiles": false
+            });
+        }
         //Attempt to add series
         try {
             var addSonarr = Meteor.http.call("POST", soURL + "/api/Series/", {headers: {"X-Api-Key":soAPI}, data: {
                 "tvdbId":tvdb,
                 "title":title,
                 "qualityProfileId":soQualityProfileId,
-                "seasons":[{}],
+                "seasons":seasons,
                 "seasonFolder":soSeasonFolder,
-                "rootFolderPath":soRootFolderPath
+                "rootFolderPath":soRootFolderPath,
+                "addOptions":options
             }});
             return "added";
         }
@@ -438,15 +473,15 @@ Meteor.methods({
         }
         return false;
     },
-    'addTV' : function(id, tvdb, title, year, puser) {
+    'addTV' : function(id, tvdb, title, year, puser, getAll, totalSeasons) {
         if (Settings.findOne({_id:"sonarrsetting"}).enabled){
-            var sickAdd = Meteor.call('searchSonarr', id, tvdb, title, year, puser);   
+            var sickAdd = Meteor.call('searchSonarr', id, tvdb, title, year, puser, getAll, totalSeasons);
         }
-        
+
         if (Settings.findOne({_id:"sickragesetting"}).enabled) {
-            var sonarAdd = Meteor.call('searchSickRage', id, tvdb, title, year, puser);
-        } 
-        
+            var sonarAdd = Meteor.call('searchSickRage', id, tvdb, title, year, puser, getAll);
+        }
+
         if ((sickAdd == "added") || (sonarAdd == "added")) {
             TV.insert({
               title: title,
@@ -459,7 +494,7 @@ Meteor.methods({
             });
             return "added";
         }
-        
+
         if (sickAdd) {
             return sickAdd;
         } else if (sonarAdd) {
@@ -477,29 +512,38 @@ Meteor.methods({
             return "added";
         }
     },
-    'getCommit' : function(){
-        var currentCommit = Meteor.npmRequire('git-rev-sync');
-        return currentCommit.short();
-    },
     'getBranch' : function(){
         var currentBranch = Meteor.npmRequire('git-rev-sync');
         return currentBranch.branch();
     },
-    'getCurrentCommit' : function(){
-        var git = Meteor.npmRequire('git-rev-sync');
-        var branch = git.branch();
-        var commit = git.long();
+    'checkForUpdate' : function () {
+        var branch = Meteor.call('getBranch');
         
-        var latestGit = Meteor.http.call("GET", "https://api.github.com/repos/lokenx/plexrequests-meteor/branches/" + branch,
-                                         {headers: {"User-Agent": "Meteor/1.1"}});
+        Version.update({_id:"versionInfo"},
+            {$set: {
+                branch: branch,
+                number: "0.5.1",
+                updateAvailable: false
+            }
+        });
         
-        if (latestGit.statusCode == 403) {
-            return "error"
-        } else if (latestGit['data']['commit']['sha'] == commit) {
-            return true;
-        } else {
+        var currentVersion = Version.findOne({_id: "versionInfo"}).number;
+
+        try {
+            var latestJson = Meteor.http.call("GET","https://api.github.com/repos/lokenx/plexrequests-meteor/contents/version.txt?ref=" + branch,{headers: {"User-Agent": "Meteor/1.1"}});
+        }
+        catch (err){
+            console.log(err);
             return false;
         }
-    }
+        
+        var latestJson64 = latestJson['data']['content'];
+        var latestVersion64 = new Buffer(latestJson64, "base64").toString();
+        var latestVersion = latestVersion64.slice(0, - 1);
 
+        if (latestVersion > currentVersion) {
+            Version.update({_id: "versionInfo"},{$set: {updateAvailable: true}});
+        }
+        return true;
+    }
 });
